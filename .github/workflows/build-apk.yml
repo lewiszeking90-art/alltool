@@ -17,30 +17,25 @@ jobs:
       - name: Extract Project ZIP (if committed as ZIP)
         run: |
           if [ -f alltool-android-project.zip ]; then
-            echo "📦 Found alltool-android-project.zip at root. Unzipping..."
             unzip -o alltool-android-project.zip
-            chmod +x gradlew
-          elif [ -f *.zip ]; then
-            echo "📦 Found ZIP archive. Unzipping..."
-            unzip -o *.zip
-            chmod +x gradlew
           fi
+
+      - name: Remove missing icon references
+        run: sed -i '/android:icon=/d; /android:roundIcon=/d' app/src/main/AndroidManifest.xml
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
         with:
           java-version: '21'
           distribution: 'temurin'
-          cache: gradle
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Set up Gradle
+        uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: 8.10.2
 
-      - name: Make Gradle executable
-        run: chmod +x ./gradlew
-
-      - name: Build Debug APK with Gradle
-        run: ./gradlew assembleDebug --stacktrace --no-daemon
+      - name: Build Debug APK
+        run: gradle assembleDebug --stacktrace --no-daemon
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
@@ -49,4 +44,3 @@ jobs:
           path: app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
-          
