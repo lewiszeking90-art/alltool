@@ -14,14 +14,61 @@ jobs:
       - name: Checkout Repository
         uses: actions/checkout@v4
 
-      - name: Extract Project ZIP (if committed as ZIP)
+      - name: Extract project ZIP (if committed as ZIP)
         run: |
-          if [ -f alltool-android-project.zip ]; then
-            unzip -o alltool-android-project.zip
+          if [ -f alltool-project.zip ]; then
+            unzip -o alltool-project.zip
+          fi
+          if [ -f firebaseConfig.ts ]; then
+            cp firebaseConfig.ts src/firebaseConfig.ts
+            echo "Config Firebase trouvée"
           fi
 
-      - name: Remove missing icon references
-        run: sed -i '/android:icon=/d; /android:roundIcon=/d' app/src/main/AndroidManifest.xml
+      - name: Set up Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Install OCR languages (bundled inside the APK)
+        run: |
+          for l in eng fra spa deu por ita ara chi_sim swa; do
+            npm install --no-save --no-audit --no-fund @tesseract.js-data/$l || echo "Langue $l indisponible"
+          done
+
+      - name: Download Whisper model (bundled inside the APK)
+        run: |
+          M=public/models/whisper-base
+          B=https://huggingface.co/Xenova/whisper-base/resolve/main
+          mkdir -p $M/onnx
+          for f in config.json generation_config.json preprocessor_config.json tokenizer.json tokenizer_config.json onnx/encoder_model_quantized.onnx onnx/decoder_model_merged_quantized.onnx; do
+            curl -L --fail --retry 3 -o $M/$f $B/$f
+          done
+          for f in added_tokens.json merges.txt vocab.json normalizer.json special_tokens_map.json; do
+            curl -L --fail --retry 3 -o $M/$f $B/$f || echo "optionnel: $f absent"
+          done
+          du -sh $M
+
+      - name: Copy OCR engine and PDF reader into the app
+        run: node scripts/copy-assets.mjs
+
+      - name: Build web app
+        run: npm run build
+
+      - name: Add Android platform
+        run: |
+          npx cap add android
+          npx cap sync android
+
+      - name: Icon and permissions
+        run: |
+          RES=android/app/src/main/res
+          rm -rf $RES/mipmap-anydpi-v26
+          cp -r android-assets/res/* $RES/
+          sed -i 's|</manifest>|    <uses-permission android:name="android.permission.RECORD_AUDIO" />\n    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />\n    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />\n    <uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />\n    <uses-permission android:name="android.permission.READ_MEDIA_VIDEO" />\n    <uses-permission android:name="android.permission.READ_MEDIA_AUDIO" />\n</manifest>|' android/app/src/main/AndroidManifest.xml
+          grep -n "uses-permission" android/app/src/main/AndroidManifest.xml
 
       - name: Set up JDK 21
         uses: actions/setup-java@v4
@@ -29,18 +76,14 @@ jobs:
           java-version: '21'
           distribution: 'temurin'
 
-      - name: Set up Gradle
-        uses: gradle/actions/setup-gradle@v4
-        with:
-          gradle-version: 8.10.2
-
       - name: Build Debug APK
-        run: gradle assembleDebug --stacktrace --no-daemon
+        working-directory: android
+        run: ./gradlew assembleDebug --stacktrace --no-daemon
 
       - name: Upload Debug APK Artifact
         uses: actions/upload-artifact@v4
         with:
-          name: AllTool-v1.0.0-Debug-APK
-          path: app/build/outputs/apk/debug/app-debug.apk
+          name: AllTool-Debug-APK
+          path: android/app/build/outputs/apk/debug/app-debug.apk
           if-no-files-found: error
           retention-days: 14
